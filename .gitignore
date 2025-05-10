@@ -10,6 +10,7 @@ outputs/
 
 # scripts
 test.py
+run.ipynb
 
 # media 
 *.avi
