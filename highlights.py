@@ -126,46 +126,58 @@ class Highlights:
     
     def _debounce_and_commit_score(self, new_score, ts):
         """
-        Debounces a stable score reading:
-          - Buffers (new_score, ts) in a time‐window queue.
-          - Drops entries older than debounce_secs.
-          - If all buffered entries match the current new_score, and the span >= debounce_secs,
-            returns True once, then resets.
-          - Ignores any new_score that is lower than the last committed score.
+        Debounces a stable score reading, with an optional “easy AD” override:
+        - Buffers (new_score, ts) in a time‐window queue.
+        - Drops entries older than debounce_secs.
+        - If easy_AD is enabled and the score is AD vs. 40 ([50,40] or [40,50]),
+            commits as soon as it’s been present for easy_AD_pct * debounce_secs.
+        - Otherwise, waits until all buffered entries match new_score for full debounce_secs.
+        - Ignores any new_score that is lower than the last committed score.
+        Returns True once when the score is committed, else False.
         """
-
-        # If it’s the same as our last committed, clear and skip
         last = self._last_committed_score
+        # Skip identical to last commit
         if last and new_score['set_score'] == last['set_score'] and new_score['point_score'] == last['point_score']:
             self._score_queue.clear()
             return False
-        
-        if last:
-            new_points = new_score['point_score']
-            last_points = last['point_score']
 
-            # Ignore if new points are less than last points (regression)
-            if (new_points[0] < last_points[0]) or (new_points[1] < last_points[1]):
+        # Skip regressions
+        if last:
+            new_pts = new_score['point_score']
+            last_pts = last['point_score']
+            if new_pts[0] < last_pts[0] or new_pts[1] < last_pts[1]:
                 self._score_queue.clear()
                 return False
 
-        # Append new reading
+        # Buffer this reading
         self._score_queue.append((new_score, ts))
-
-        # Drop old entries beyond debounce window
+        # Evict old readings
         while self._score_queue and (ts - self._score_queue[0][1] > self.debounce_secs):
             self._score_queue.popleft()
 
-        # Check stability
+        # Compute duration in buffer
+        duration = self._score_queue[-1][1] - self._score_queue[0][1]
+
+        # Easy-AD
+        pts = new_score['point_score']
+        is_ad_case = (pts == [50, 40]) or (pts == [40, 50])
+        if cfg.highlights.easy_AD and is_ad_case:
+            threshold = self.debounce_secs * cfg.highlights.easy_AD_percentage
+            if duration >= threshold:
+                self._last_committed_score = {
+                    'set_score': new_score['set_score'],
+                    'point_score': new_score['point_score']
+                }
+                self._score_queue.clear()
+                return True
+
+        # Full debounce
         stable = all(
             entry[0]['set_score'] == new_score['set_score'] and
             entry[0]['point_score'] == new_score['point_score']
             for entry in self._score_queue
         )
-        duration = self._score_queue[-1][1] - self._score_queue[0][1] if self._score_queue else 0
-
         if stable and duration >= self.debounce_secs:
-            # commit once
             self._last_committed_score = {
                 'set_score': new_score['set_score'],
                 'point_score': new_score['point_score']
@@ -229,7 +241,8 @@ class ScoreReader:
         scoreboard_config = detector_cfg.get(DetectorType.SCOREBOARD)
         self.detector = Detector(scoreboard_config)
         
-        self.OCRinference = PaddleOCRProcessor(lang='en')
+        use_gpu = cfg.general.device != 'cpu'
+        self.OCRinference = PaddleOCRProcessor(lang='en', use_gpu=use_gpu)
 
     def get_score(self, frame):
         score = None
@@ -286,6 +299,7 @@ class Points:
         self.current_server = 'player1'
         # Histories
         self.game_ending_points = []
+        self.set_ending_points = []
         self.break_points = []
         self.advantage_points = []
 
@@ -313,6 +327,11 @@ class Points:
 
         prev_ts, prev = self.last_score
         curr = score
+        
+        # 0) Set end detection
+        if self._is_set_end(curr):
+            highlights['set_ending'] = True
+            self._record_set_end(prev_ts, prev)
 
         # 1) Game end detection
         if self._is_game_end(prev, curr):
@@ -341,7 +360,15 @@ class Points:
         if curr_pt == [0, 0] and any(p > 0 for p in prev_pt):
             return True
         # b) Set score increment
-        if prev['set_score'] != curr['set_score']:
+        if prev['set_score'][0] < curr['set_score'][0] or prev['set_score'][1] < curr['set_score'][1]:
+            return True
+        return False
+    
+    def _is_set_end(self, curr):
+        curr_pt = curr['point_score']
+        curr_set = curr['set_score']
+        # a) Points reset -> new game
+        if curr_pt == [0, 0] and curr_set == [0, 0]:
             return True
         return False
 
@@ -370,6 +397,16 @@ class Points:
             'point_score': tuple(score.get('point_score', [0,0]))
         }
         self.game_ending_points.append(record)
+        
+    def _record_set_end(self, timestamp, score):
+        record = {
+            'timestamp': timestamp,
+            'player1': score.get('player1'),
+            'player2': score.get('player2'),
+            'set_score': tuple(score.get('set_score', [0,0])),  # (p1_sets, p2_sets)
+            'point_score': tuple(score.get('point_score', [0,0]))
+        }
+        self.set_ending_points.append(record)
 
     def _record_break_point(self, timestamp, score):
         record = {
@@ -401,7 +438,8 @@ class Points:
         return {
             'game_ending_points': self.game_ending_points,
             'break_points': self.break_points,
-            'advantage_points': self.advantage_points
+            'advantage_points': self.advantage_points,
+            'set_ending_points': self.set_ending_points
         }
         
 

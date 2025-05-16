@@ -132,3 +132,5 @@ __C.OCR.preprocess = True
 
 __C.highlights = edict()
 __C.highlights.debounce_secs_for_score_change = 1
+__C.highlights.easy_AD = True
+__C.highlights.easy_AD_percentage = 0.2

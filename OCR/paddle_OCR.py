@@ -11,8 +11,13 @@ logging.getLogger('ppocr').setLevel(logging.ERROR)
 
 
 class PaddleOCRProcessor:
-    def __init__(self, lang='en', use_angle_cls=False):
-        self.ocr = PaddleOCR(use_angle_cls=use_angle_cls, lang=lang)
+    def __init__(self, lang='en', use_angle_cls=False, use_gpu=False, gpu_mem=6000):
+        self.ocr = PaddleOCR(
+                                use_angle_cls=use_angle_cls,
+                                use_gpu=use_gpu,
+                                gpu_mem=gpu_mem,
+                                lang=lang
+                            )
 
     def process_image(self, image):
         ret = {"boxes": [], "texts": [], "scores": []}
