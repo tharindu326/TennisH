@@ -134,3 +134,8 @@ __C.highlights = edict()
 __C.highlights.debounce_secs_for_score_change = 1
 __C.highlights.easy_AD = True
 __C.highlights.easy_AD_percentage = 0.2
+__C.highlights.extended_rally_energy_threshold = 2000
+
+__C.players = edict()
+__C.players.confirm_threshold = 10  # frames needed to confirm a new track
+__C.players.deactivation_timeout = 3  # seconds without update to consider a player lost

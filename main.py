@@ -95,7 +95,7 @@ class Video:
             start_time = time.time()
             if frame_filter_Count in selected_frameIDs:
                 
-                oneline_targets, frame = self.highlights.player_track(frame)
+                oneline_targets, frame = self.highlights.player_track(frame, video_timestamp)
                 frame = self.highlights.get_score(frame, video_timestamp)
                 # print(self.highlights.score_history)
                 
