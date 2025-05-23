@@ -25,7 +25,6 @@ class Video:
         self.time_array = []
         self.Vidout_path = Vidout_path
         os.makedirs(Vidout_path, exist_ok=True)
-        self.highlights = Highlights(videoPath)
 
         # Determine source identifier
         path_prefix = ''.join(letter for letter in str(videoPath).split(':')[0] if letter.isalnum())
@@ -55,6 +54,7 @@ class Video:
                 print(f'Reading the stream FPS as {self.video_fps} from the config')
             else:
                 raise ValueError('Source FPS is not defined correctly or undefined. Please define it in cfg.video.FPS')
+        self.highlights = Highlights(videoPath, self.video_fps)
         print(f'video_fps: {self.video_fps}')
 
     @staticmethod
@@ -95,9 +95,7 @@ class Video:
             start_time = time.time()
             if frame_filter_Count in selected_frameIDs:
                 
-                oneline_targets, frame = self.highlights.player_track(frame, video_timestamp)
-                frame = self.highlights.get_score(frame, video_timestamp)
-                # print(self.highlights.score_history)
+                frame = self.highlights.generate(frame, video_timestamp)
                 
                 if cfg.flags.image_show:
                     h, w = frame.shape[:2]

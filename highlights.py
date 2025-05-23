@@ -9,6 +9,8 @@ import os
 from datetime import datetime
 import numpy as np
 import re
+import copy
+from enum import Enum
 
 
 class Score:
@@ -21,7 +23,108 @@ class Score:
         self.p1, self.p2 = score['point_score']
         self.player1 = score.get('player1')
         self.player2 = score.get('player2')   
+
+
+class CourtSide(Enum):
+    TOP = 0
+    BOTTOM = 1
+    UNKNOWN = 2
+    
+
+class Ball:
+    def __init__(self, initial_bbox, timestamp, net_box, max_history=30):
+        self.bboxes = deque()
+        self.bboxes.append(initial_bbox)
+        self.timestamps = deque()
+        self.timestamps.append(timestamp)
+        self.nets = deque()
+        self.nets.append(net_box)
+        self.first_seen = timestamp
+        self.last_seen = timestamp
         
+    def get_ball_track(self, start_time, end_time):
+        trajectory = [(bbox, self.timestamps[i], self.nets[i]) for i, bbox in enumerate(self.bboxes) if start_time <= self.timestamps[i] <= end_time]
+        return trajectory
+        
+    def update(self, bbox, timestamp, net_box):    
+        self.bboxes.append(bbox)
+        self.timestamps.append(timestamp)
+        self.nets.append(net_box)
+        self.last_seen = timestamp
+
+    def get_aces_serviceWinners(self, start_time, end_time):
+        trajectory = self.get_ball_track(start_time, end_time)
+        
+        hits = 0
+        returns = 0
+        current_rally_hits = 0
+        direction_changes = []
+        velocities = []
+        current_side = CourtSide.UNKNOWN
+
+        prev_centroid = None
+        prev_timestamp = None
+
+        for i, (bbox, timestamp, net) in enumerate(trajectory):
+            centroid = self._get_centroid(bbox)
+
+            if prev_centroid is not None and prev_timestamp is not None:
+                dt = timestamp - prev_timestamp
+                if dt > 0:
+                    vx = (centroid[0] - prev_centroid[0]) / dt
+                    vy = (centroid[1] - prev_centroid[1]) / dt
+                    velocities.append((vx, vy))
+
+                    if len(velocities) >= 2:
+                        prev_vx, prev_vy = velocities[-2]
+                        curr_vx, curr_vy = velocities[-1]
+                        dot_product = prev_vx * curr_vx + prev_vy * curr_vy
+                        prev_mag = (prev_vx**2 + prev_vy**2)**0.5
+                        curr_mag = (curr_vx**2 + curr_vy**2)**0.5
+
+                        if prev_mag > 0 and curr_mag > 0:
+                            cosine = dot_product / (prev_mag * curr_mag)
+                            cosine = max(min(cosine, 1.0), -1.0)
+                            angle = np.arccos(cosine) * 180 / np.pi
+
+                            if angle > 45:
+                                hits += 1
+                                current_rally_hits += 1
+                                direction_changes.append(i)
+
+            new_side = self._determine_side(bbox, net_box=net)
+            if new_side != current_side and \
+            new_side != CourtSide.UNKNOWN and \
+            current_side != CourtSide.UNKNOWN:
+                returns += 1
+
+            current_side = new_side
+            prev_centroid = centroid
+            prev_timestamp = timestamp
+
+        # Ace: ball crossed net once, no return hit detected
+        is_ace = (returns == 1 and current_rally_hits == 0)
+
+        # Server winner: rally with one hit and one return crossing
+        is_server_winner = (current_rally_hits == 1 and returns == 1)
+
+        return is_ace, is_server_winner
+    
+    def _get_centroid(self, bbox):
+        cx = (bbox[0] + bbox[2]) / 2
+        cy = (bbox[1] + bbox[3]) / 2
+        return (cx, cy)
+    
+    def _determine_side(self, bbox, net_box):
+        if not net_box:
+            return CourtSide.UNKNOWN
+        ball_centroid = self._get_centroid(bbox)
+        net_y = (net_box[1] + net_box[3]) / 2
+        if ball_centroid[1] < net_y:
+            return CourtSide.TOP
+        else:
+            return CourtSide.BOTTOM
+    
 
 class Highlight():
     def __init__(self, score_obj: Score, h_types):
@@ -32,13 +135,15 @@ class Highlight():
         
         
 class Highlights:
-    def __init__(self, input_video_path):
-        self.tracker = PlayerTracker()
+    def __init__(self, input_video_path, source_fps):
+        self.detector = Detector()
+        self.tracker = GameTracker()
         self.scorer = ScoreReader()
+        self.ball = None
         self.scores = []
         self.highlights = []
-        self.debounce_secs = cfg.highlights.debounce_secs_for_score_change
-        self._score_queue = deque()
+        self.maxlen = int(source_fps * cfg.highlights.debounce_secs_for_score_change)
+        self._score_queue = deque(maxlen=self.maxlen)
         self._last_committed_score = None
         
         video_basename = os.path.splitext(os.path.basename(input_video_path))[0]
@@ -65,16 +170,50 @@ class Highlights:
         self.last_score = None  # tuple(timestamp, score_data)
         # Current server: 'player1' or 'player2'
         self.current_server = 'player1'
+        self.start_flag = True
 
-    def player_track(self, frame, video_timestamp):
+    def generate(self, frame, video_timestamp):
         """Track players in the frame"""
-        return self.tracker.track_players(frame, video_timestamp)
+        
+        results, frame_det = self.detector.detect(frame.copy())
+        detections = results[0].boxes.data.cpu().numpy()
+        online_targets_player, frame_players = self.tracker.track_players(frame_det, video_timestamp, detections)
+        
+        # update ball data
+        class_ids = detections[:, -1].astype(int)
+        ball_dets = detections[(class_ids == 0)] # ball
+        ball_boxes = ball_dets[:, :-2].astype(int)
+        net_dets = detections[(class_ids == 0)] # net
+        net_boxes = net_dets[:, :-2].astype(int)
+        if len(net_boxes) > 0:
+            net = net_boxes[0].tolist()
+        else:
+            net = []
+        for box in ball_boxes:
+            x1, y1, x2, y2 = box
+            bbox = (x1, y1, x2, y2)
+            if self.ball is None:
+                self.ball = Ball(bbox, video_timestamp, net) 
+            else:
+                self.ball.update(bbox, video_timestamp, net_box=net)
+        
+        # if cfg.tracker.ball_track:
+        #     online_targets_ball, frame_out = self.tracker.track_ball(frame_players, video_timestamp, detections)
+        # else:
+        #     online_targets_ball, frame_out = [], frame_players
+        
+        score_box_dets = detections[(class_ids == 4)] # score
+        boxes = score_box_dets[:, :-2].astype(int)
+        frame_score = self.get_score(frame_det, video_timestamp, boxes, net)
+        
+        return frame_score
+        
 
-    def get_score(self, frame, video_timestamp): 
+    def get_score(self, frame, video_timestamp, boxes, net): 
         """
         Process the frame to extract score and detect break/end points
         """
-        frame, new_score = self.scorer.get_score(frame)
+        frame, new_score = self.scorer.get_score(frame, boxes)
         if not new_score:
             return frame
         if not self._is_valid_score(new_score):
@@ -85,29 +224,41 @@ class Highlights:
         if self._debounce_and_commit_score(new_score, video_timestamp):
             scoring_events = self.process_score(video_timestamp, new_score)
            
-            p1, p2 = self.tracker._top_two_players()
-            energy = p1.compute_total_distance() + p2.compute_total_distance()
-            # flag extended rally if movement energy exceeds threshold
-            if energy >= cfg.highlights.extended_rally_energy_threshold:
-                highlights['extended_rally'] = True
-            
-            # remove the players after a point
-            self.tracker.players = []
-
-            self.scores.append(Score(start_time=min(p1.first_seen, p2.first_seen), end_time=max(p1.last_seen, p2.last_seen), score=new_score, 
-                               energy=energy, events=list(scoring_events.keys())))
-            
-            for k, v in scoring_events.items():
-                if v and k in ['advantage', 'break_point', 'game_ending']:
-                    highlights[k] = True
+            p1, p2 = self.tracker._top_two_players(net)
+            if p1 and p2:
+                score_start_time = min(p1.first_seen, p2.first_seen)
+                score_end_time = max(p1.last_seen, p2.last_seen)
+                
+                # get the ball tragectory by time 
+                is_ace, is_server_winner = self.ball.get_aces_serviceWinners(score_start_time, score_end_time)
+                if is_ace:
+                    highlights['ace'] = True
                     
-            self.highlights.append(Highlight(score_obj=self.scores[-1], h_types=highlights))
-            
-            if highlights:
-                if cfg.flags.overlay_highlights:
-                    self._draw_highlight_overlay(frame, highlights)
+                if is_server_winner:
+                    highlights['service_winner'] = True
+                    
+                energy = p1.compute_total_distance() + p2.compute_total_distance()
+                # flag extended rally if movement energy exceeds threshold
+                if energy >= cfg.highlights.extended_rally_energy_threshold:
+                    highlights['extended_rally'] = True
+                
+                # remove the players after a point
+                self.tracker.players = []
 
-            self.score2CSV()
+                self.scores.append(Score(start_time=score_start_time, end_time=score_end_time, score=new_score, 
+                                energy=energy, events=list(scoring_events.keys())))
+                
+                for k, v in scoring_events.items():
+                    if v and k in ['advantage', 'break_point', 'game_ending']:
+                        highlights[k] = True
+                        
+                self.highlights.append(Highlight(score_obj=self.scores[-1], h_types=highlights))
+                
+                if highlights:
+                    if cfg.flags.overlay_highlights:
+                        self._draw_highlight_overlay(frame, highlights)
+
+                self.score2CSV()
             
         if cfg.flags.overlay_score:      
             frame = self.draw_score(frame)
@@ -237,24 +388,131 @@ class Highlights:
             return "AD"
         return str(val)
     
+    def _get_possible_next_scores(self, current_score):
+        """
+        Given current score, return list of logically possible next score states.
+        Returns list of dicts with 'point_score' and 'set_score' keys.
+        """
+        if not current_score:
+            return []
+        
+        curr_pts = current_score['point_score']
+        curr_sets = current_score['set_score']
+        possible_scores = []
+        
+        p1_pts, p2_pts = curr_pts
+        s1_sets, s2_sets = curr_sets
+        
+        # Helper to create score dict
+        def make_score(p1, p2, s1=None, s2=None):
+            return {
+                'point_score': [p1, p2],
+                'set_score': [s1 or s1_sets, s2 or s2_sets]
+            }
+        
+        # Regular scoring (0, 15, 30)
+        if p1_pts < 30 and p2_pts < 30:
+            possible_scores.extend([
+                make_score(p1_pts + 15, p2_pts),  # Player 1 scores
+                make_score(p1_pts, p2_pts + 15)   # Player 2 scores
+            ])
+        
+        # One player at 30, other below
+        elif p1_pts == 30 and p2_pts < 30:
+            possible_scores.extend([
+                make_score(40, p2_pts),           # Player 1 to 40
+                make_score(p1_pts, p2_pts + 15)  # Player 2 scores
+            ])
+        
+        elif p1_pts < 30 and p2_pts == 30:
+            possible_scores.extend([
+                make_score(p1_pts + 15, p2_pts),  # Player 1 scores
+                make_score(p1_pts, 40)            # Player 2 to 40
+            ])
+        
+        # Both at 30
+        elif p1_pts == 30 and p2_pts == 30:
+            possible_scores.extend([
+                make_score(40, 30),  # Player 1 to 40
+                make_score(30, 40)   # Player 2 to 40
+            ])
+        
+        # Game point scenarios
+        elif p1_pts == 40 and p2_pts < 40:
+            # Player 1 can win game or Player 2 can score
+            possible_scores.extend([
+                make_score(0, 0, s1_sets + 1, s2_sets),  # Player 1 wins game
+                make_score(p1_pts, p2_pts + 15)          # Player 2 scores
+            ])
+        
+        elif p1_pts < 40 and p2_pts == 40:
+            # Player 2 can win game or Player 1 can score
+            possible_scores.extend([
+                make_score(0, 0, s1_sets, s2_sets + 1),  # Player 2 wins game
+                make_score(p1_pts + 15, p2_pts)          # Player 1 scores
+            ])
+        
+        # Deuce and advantage scenarios
+        elif p1_pts == 40 and p2_pts == 40:  # Deuce
+            possible_scores.extend([
+                make_score(50, 40),  # Player 1 advantage
+                make_score(40, 50)   # Player 2 advantage
+            ])
+        
+        elif p1_pts == 50 and p2_pts == 40:  # Player 1 advantage
+            possible_scores.extend([
+                make_score(0, 0, s1_sets + 1, s2_sets),  # Player 1 wins game
+                make_score(40, 40)                       # Back to deuce
+            ])
+        
+        elif p1_pts == 40 and p2_pts == 50:  # Player 2 advantage
+            possible_scores.extend([
+                make_score(0, 0, s1_sets, s2_sets + 1),  # Player 2 wins game
+                make_score(40, 40)                       # Back to deuce
+            ])
+        
+        return possible_scores
+
+    def _is_predicted_score(self, new_score):
+        """
+        Check if new_score matches one of the logically possible next states.
+        """
+        if not self._last_committed_score:
+            return False
+        
+        possible_scores = self._get_possible_next_scores(self._last_committed_score)
+        # print("possible_scores", possible_scores)
+        # print("new_scores", new_score)
+        for possible in possible_scores:
+            if (new_score['point_score'] == possible['point_score'] and 
+                new_score['set_score'] == possible['set_score']):
+                return True
+        
+        return False
+
     def _debounce_and_commit_score(self, new_score, ts):
         """
-        Debounces a stable score reading, with an optional “easy AD” override:
-        - Buffers (new_score, ts) in a time‐window queue.
-        - Drops entries older than debounce_secs.
-        - If easy_AD is enabled and the score is AD vs. 40 ([50,40] or [40,50]),
-            commits as soon as it’s been present for easy_AD_pct * debounce_secs.
-        - Otherwise, waits until all buffered entries match new_score for full debounce_secs.
-        - Ignores any new_score that is lower than the last committed score.
-        Returns True once when the score is committed, else False.
+        Predictive debouncing using fixed-size deque:
+        - Deque automatically drops old values when maxlen is reached
+        - Accept any valid score initially when no committed score exists
+        - Only accept logically expected scores afterward
+        - Commit when deque is full and all entries are stable
         """
         last = self._last_committed_score
+        
+        if self.start_flag:
+            if new_score['set_score'] == [0, 0] and new_score['point_score'] == [0, 0]:
+                self.start_flag = False  # Game has started
+            else:
+                # Ignore everything until 0-0 appears
+                return False
+                
         # Skip identical to last commit
         if last and new_score['set_score'] == last['set_score'] and new_score['point_score'] == last['point_score']:
             self._score_queue.clear()
             return False
 
-        # Skip regressions
+        # Skip regressions (only if we have a last committed score)
         if last:
             new_pts = new_score['point_score']
             last_pts = last['point_score']
@@ -262,41 +520,30 @@ class Highlights:
                 self._score_queue.clear()
                 return False
 
-        # Buffer this reading
+        # If no committed score yet, accept any valid score (initial state)
+        # Otherwise, only accept predicted/expected scores
+        if last and not self._is_predicted_score(new_score):
+            self._score_queue.clear()
+            return False
+
+        # Add to deque - old values automatically dropped when maxlen reached
         self._score_queue.append((new_score, ts))
-        # Evict old readings
-        while self._score_queue and (ts - self._score_queue[0][1] > self.debounce_secs):
-            self._score_queue.popleft()
-
-        # Compute duration in buffer
-        duration = self._score_queue[-1][1] - self._score_queue[0][1]
-
-        # Easy-AD
-        pts = new_score['point_score']
-        is_ad_case = (pts == [50, 40]) or (pts == [40, 50])
-        if cfg.highlights.easy_AD and is_ad_case:
-            threshold = self.debounce_secs * cfg.highlights.easy_AD_percentage
-            if duration >= threshold:
+        
+        # Check if deque is full and all entries are stable
+        if len(self._score_queue) == self._score_queue.maxlen:
+            stable = all(
+                entry[0]['set_score'] == new_score['set_score'] and
+                entry[0]['point_score'] == new_score['point_score']
+                for entry in self._score_queue
+            )
+            
+            if stable:
                 self._last_committed_score = {
                     'set_score': new_score['set_score'],
                     'point_score': new_score['point_score']
                 }
                 self._score_queue.clear()
                 return True
-
-        # Full debounce
-        stable = all(
-            entry[0]['set_score'] == new_score['set_score'] and
-            entry[0]['point_score'] == new_score['point_score']
-            for entry in self._score_queue
-        )
-        if stable and duration >= self.debounce_secs:
-            self._last_committed_score = {
-                'set_score': new_score['set_score'],
-                'point_score': new_score['point_score']
-            }
-            self._score_queue.clear()
-            return True
 
         return False
     
@@ -324,18 +571,23 @@ class Highlights:
                 y_pos += 30
     
 
-class PlayerTracker:
+class GameTracker:
     def __init__(self):
-        detector_cfg = DetectorConfig(cfg)
-        player_config = detector_cfg.get(DetectorType.PLAYER)
-        self.detector = Detector(player_config)
+        player_cfg = copy.deepcopy(cfg)
+        player_cfg.tracker.classes = [3]
+        self.tracker_player = Tracker(player_cfg)
 
-        self.tracker = Tracker(cfg)
+        if cfg.tracker.ball_track:
+            ball_cfg = copy.deepcopy(cfg)
+            ball_cfg.tracker.classes = [0]
+            self.tracker_ball = Tracker(ball_cfg)
+            
         self.colors = cfg.general.COLORS
 
         self.players = []
         self._counters = {}
-
+        self.balls = []
+        
     def _find_player_by_id(self, track_id):
         """
         Retrieve a Player object by track_id, or None if not found.
@@ -344,18 +596,38 @@ class PlayerTracker:
             if player.id == track_id:
                 return player
         return None
+    
+    def _find_ball_by_id(self, track_id):
+        """
+        Retrieve a ball object by track_id, or None if not found.
+        """
+        for ball in self.balls:
+            if ball.id == track_id:
+                return ball
+        return None        
+        
+    def track_ball(self, frame, timestamp, detections):
+        online_targets_ball = self.tracker_ball.track(frame.copy(), detections)
+        for obj in online_targets_ball:
+            x1, y1, x2, y2, track_id = map(int, obj[:5])
+            bbox = (x1, y1, x2, y2)
 
-    def track_players(self, frame, timestamp):
+            if cfg.flags.overlay_ball_track:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), self.colors['blue'], 2)
+                cv2.putText(frame, f'ID:{track_id}', (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.colors['blue'], 2)
+
+        # Remove players not seen within the timeout
+        # self.players = [p for p in self.players if (current_time - p.last_seen) <= cfg.players.deactivation_timeout]
+        return online_targets_ball, frame
+
+    def track_players(self, frame, timestamp, detections):
         """
         Detect and track players in the given frame, confirming new players
         after enough appearances, updating existing ones, and pruning lost players.
         """
-        results, vis_frame = self.detector.detect(frame.copy())
-        detections = results[0].boxes.data.cpu().numpy()
-        online_targets = self.tracker.track(vis_frame.copy(), detections)
-
-        current_time = timestamp
-        for obj in online_targets:
+        online_targets_player = self.tracker_player.track(frame.copy(), detections)
+        for obj in online_targets_player:
             x1, y1, x2, y2, track_id = map(int, obj[:5])
             bbox = (x1, y1, x2, y2)
 
@@ -369,56 +641,70 @@ class PlayerTracker:
                     del self._counters[track_id]
             else:
                 player.update(bbox, timestamp)
-            if cfg.flags.overlay_track:
+            if cfg.flags.overlay_player_track:
                 color = self.colors['green'] if player else self.colors['yellow']
-                cv2.rectangle(vis_frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(vis_frame, f'ID:{track_id}', (x1, y1 - 5),
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f'ID:{track_id}', (x1, y1 - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         # Remove players not seen within the timeout
         # self.players = [p for p in self.players if (current_time - p.last_seen) <= cfg.players.deactivation_timeout]
-        return online_targets, vis_frame
-    
-    def _top_two_players(self):
+        return online_targets_player, frame
+
+    def _top_two_players(self, net_box=None):
         """
         Return the two Player objects with the longest track history whose
-        seen-intervals overlap in time. Pairs are tested in index-order:
-        (1,2), (1,3), (2,3), (1,4), (2,4), (3,4), ... up to (n-1,n).
-        If no overlapping pair exists, fall back to the two longest tracks.
+        seen-intervals overlap in time and that are on opposite sides of the net.
+        Pairs are tested in index-order: (1,2), (1,3), (2,3), ... up to (n-1,n).
+        If no pair both overlaps and straddles the net, fall back to the first overlapping pair.
+        If still none, fall back to the two longest tracks.
         If fewer than two players exist, return (p, p) or (None, None).
         """
         players = self.players
-        num_players = len(players)
-
-        if num_players == 0:
+        num = len(players)
+        if num == 0:
             return None, None
-        if num_players == 1:
+        if num == 1:
             return players[0], players[0]
 
-        player_data = [
-            (
-                player,
-                player.get_track_length(),
-                player.first_seen,
-                player.last_seen,
-            )
-            for player in players
-        ]
+        # Prepare data: (player, track_length, first_seen, last_seen, centroid_x)
+        data = []
+        for p in players:
+            length = p.get_track_length()
+            start, end = p.first_seen, p.last_seen
+            x1, y1, x2, y2 = p.last_bbox()
+            centroid_x = (x1 + x2) / 2
+            data.append((p, length, start, end, centroid_x))
         # Sort descending by track length
-        player_data.sort(key=lambda item: item[1], reverse=True)
+        data.sort(key=lambda t: t[1], reverse=True)
 
-        # Test pairs in index-order: for j in 1..num_players-1, for i in 0..j-1
-        for j in range(1, num_players):
-            player_b, _, start_b, end_b = player_data[j]
+        def on_opposite_sides(a_x, b_x, net):
+            if net is None or len(net) < 4:
+                return True
+            nx1, _, nx2, _ = net
+            net_center = (nx1 + nx2) / 2
+            return (a_x < net_center < b_x) or (b_x < net_center < a_x)
+
+        # First pass: overlap + opposite sides
+        for j in range(1, num):
+            pb, _, sb, eb, bx = data[j]
             for i in range(j):
-                player_a, _, start_a, end_a = player_data[i]
-                if self._intervals_overlap(start_a, end_a, start_b, end_b):
-                    return player_a, player_b
+                pa, _, sa, ea, ax = data[i]
+                if self._intervals_overlap(sa, ea, sb, eb) and on_opposite_sides(ax, bx, net_box):
+                    return pa, pb
 
-        # Fallback to the two longest tracks
-        top_two = player_data[:2]
-        return top_two[0][0], top_two[1][0]
+        # Second pass: any overlapping pair (ignoring net)
+        for j in range(1, num):
+            pb, _, sb, eb, _ = data[j]
+            for i in range(j):
+                pa, _, sa, ea, _ = data[i]
+                if self._intervals_overlap(sa, ea, sb, eb):
+                    return pa, pb
 
+        # Fallback: two longest
+        p1, _, _, _, _ = data[0]
+        p2, _, _, _, _ = data[1]
+        return p1, p2
 
     @staticmethod
     def _intervals_overlap(start1, end1, start2, end2):
@@ -427,19 +713,11 @@ class PlayerTracker:
 
 class ScoreReader:
     def __init__(self):
-        detector_cfg = DetectorConfig(cfg)
-        scoreboard_config = detector_cfg.get(DetectorType.SCOREBOARD)
-        self.detector = Detector(scoreboard_config)
-        
         use_gpu = cfg.general.device != 'cpu'
         self.OCRinference = PaddleOCRProcessor(lang='en', use_gpu=use_gpu)
 
-    def get_score(self, frame):
+    def get_score(self, frame, boxes):
         score = None
-        results, frame = self.detector.detect(frame)
-        
-        detections = results[0].boxes.data.cpu().numpy()
-        boxes = detections[:, :-2].astype(int) 
         for i, box in enumerate(boxes):
             x, y, x2, y2 = map(int, box)
             w, h = x2 - x, y2 - y
@@ -588,6 +866,9 @@ class Player:
         self.first_seen = timestamp
         self.last_seen = timestamp
 
+    def last_bbox(self):
+        return self.bboxes[-1]
+    
     def update(self, bbox, timestamp):
         """
         Update the player's bounding box history and last-seen timestamp.

@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 main_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(main_dir))
-from config import cfg, DetectorConfig, DetectorType
+from config import cfg
 import torch
 from thop import profile
 
@@ -29,21 +29,20 @@ def draw_boxes(img, boxes, labels, confidences, class_ids, color=(0, 255, 0), th
 
 
 class Detector:
-    def __init__(self, config):
-        self.model = YOLO(os.path.join(config.model))
-        self.config = config
-
+    def __init__(self):
+        self.model = YOLO(os.path.join(cfg.detection_player.model))
+        
     def __call__(self, img: np.ndarray) -> np.ndarray:
         return self.detect(img)
 
     def detect(self, img: np.ndarray) -> np.ndarray:
         start = time.perf_counter()
-        results = self.model.predict(source=img, conf=self.config.OBJECTNESS_CONFIDANCE,
-                                     iou=self.config.NMS_THRESHOLD,
-                                     classes=self.config.classes,
+        results = self.model.predict(source=img, conf=cfg.detection_player.OBJECTNESS_CONFIDANCE,
+                                     iou=cfg.detection_player.NMS_THRESHOLD,
+                                     classes=cfg.detection_player.classes,
                                      device=cfg.general.device,
-                                     verbose=self.config.verbose, 
-                                     max_det=self.config.max_det)
+                                     verbose=cfg.detection_player.verbose, 
+                                     max_det=cfg.detection_player.max_det)
         
         detections = results[0].boxes.data.cpu().numpy()  # (x1, y1, x2, y2, conf, cls)
         boxes = detections[:, :-2].astype(int)
@@ -66,9 +65,7 @@ if __name__ == '__main__':
     parser.add_argument("-o", "--output", type=str, required=True, help="Path to save the processed output images")
     args = parser.parse_args()
 
-    detector_cfg = DetectorConfig(cfg)
-    player_config = detector_cfg.get(DetectorType.PLAYER)
-    detector = Detector(player_config)
+    detector = Detector()
 
     if os.path.isfile(args.input):
         # Process a single image

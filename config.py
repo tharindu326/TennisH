@@ -9,20 +9,20 @@ cfg = __C
 
 # detector inference
 __C.detection_player = edict()
-__C.detection_player.model = 'model_data/best_player.pt'
-__C.detection_player.classes = [0, 1, 2, 3]  # filter by class: --class 0, or --class 0 2 3
+__C.detection_player.model = 'model_data/best.pt'
+__C.detection_player.classes = [0, 1, 2, 3, 4]  # filter by class: --class 0, or --class 0 2 3
 __C.detection_player.OBJECTNESS_CONFIDANCE = 0.2
 __C.detection_player.NMS_THRESHOLD = 0.45
 __C.detection_player.verbose = False
 __C.detection_player.max_det = 10
 
-__C.detection_scoreboard = edict()
-__C.detection_scoreboard.model = 'model_data/best_score_box.pt'
-__C.detection_scoreboard.classes = [0]  # filter by class: --class 0, or --class 0 2 3
-__C.detection_scoreboard.OBJECTNESS_CONFIDANCE = 0.2
-__C.detection_scoreboard.NMS_THRESHOLD = 0.45
-__C.detection_scoreboard.verbose = False
-__C.detection_scoreboard.max_det = 1
+# __C.detection_scoreboard = edict()
+# __C.detection_scoreboard.model = 'model_data/best_score_box.pt'
+# __C.detection_scoreboard.classes = [0]  # filter by class: --class 0, or --class 0 2 3
+# __C.detection_scoreboard.OBJECTNESS_CONFIDANCE = 0.2
+# __C.detection_scoreboard.NMS_THRESHOLD = 0.45
+# __C.detection_scoreboard.verbose = False
+# __C.detection_scoreboard.max_det = 1
 
 class DetectorType(Enum):
     PLAYER = "detection_player"
@@ -59,7 +59,8 @@ __C.flags = edict()
 __C.flags.image_show = True
 __C.flags.render_detections = True
 __C.flags.render_fps = False
-__C.flags.overlay_track = True
+__C.flags.overlay_player_track = True
+__C.flags.overlay_ball_track = True
 __C.flags.overlay_highlights = True
 __C.flags.overlay_score = True
 
@@ -74,12 +75,13 @@ __C.video.FPS = 30  # FPS of the source
 # Trackers
 __C.tracker = edict()
 __C.tracker.type = 'bytetrack'  # 'boosttrack', 'bytetrack'  'ocsort' Select the tracker. But here we only use bytetrack
-__C.tracker.classes = [3]  # classes id to track
+__C.tracker.classes = []  # classes id to track
 __C.tracker.reid_weights = 'model_data/osnet_x0_25_msmt17.pt'
 __C.tracker.time_since_update_threshold = 6  # last update of the track is before 6 frames it will still consider unconfirmed tracks as active
 __C.tracker.trail_length = 60
 __C.tracker.enable = True
 __C.tracker.student_reinit_iou_threshold = 0.1
+__C.tracker.ball_track = True
 
 # ByteTracker: In use
 __C.bytetrack = edict()
@@ -131,9 +133,7 @@ __C.OCR = edict()
 __C.OCR.preprocess = True
 
 __C.highlights = edict()
-__C.highlights.debounce_secs_for_score_change = 1
-__C.highlights.easy_AD = True
-__C.highlights.easy_AD_percentage = 0.2
+__C.highlights.debounce_secs_for_score_change = 0.2
 __C.highlights.extended_rally_energy_threshold = 2000
 
 __C.players = edict()
