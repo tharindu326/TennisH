@@ -407,7 +407,8 @@ class Highlights:
         def make_score(p1, p2, s1=None, s2=None):
             return {
                 'point_score': [p1, p2],
-                'set_score': [s1 or s1_sets, s2 or s2_sets]
+                'set_score': [s1 if s1 is not None else s1_sets, 
+                            s2 if s2 is not None else s2_sets]
             }
         
         # Regular scoring (0, 15, 30)
@@ -417,7 +418,7 @@ class Highlights:
                 make_score(p1_pts, p2_pts + 15)   # Player 2 scores
             ])
         
-        # One player at 30, other below
+        # One player at 30, other below 30
         elif p1_pts == 30 and p2_pts < 30:
             possible_scores.extend([
                 make_score(40, p2_pts),           # Player 1 to 40
@@ -430,42 +431,56 @@ class Highlights:
                 make_score(p1_pts, 40)            # Player 2 to 40
             ])
         
-        # Both at 30
+        # Both at 30 (30-30)
         elif p1_pts == 30 and p2_pts == 30:
             possible_scores.extend([
                 make_score(40, 30),  # Player 1 to 40
                 make_score(30, 40)   # Player 2 to 40
             ])
         
-        # Game point scenarios
+        # Game point scenarios (40 vs less than 40, but not deuce)
         elif p1_pts == 40 and p2_pts < 40:
-            # Player 1 can win game or Player 2 can score
-            possible_scores.extend([
-                make_score(0, 0, s1_sets + 1, s2_sets),  # Player 1 wins game
-                make_score(p1_pts, p2_pts + 15)          # Player 2 scores
-            ])
+            if p2_pts == 30:
+                # Special case: 40-30, player 2 can tie to deuce
+                possible_scores.extend([
+                    make_score(0, 0, s1_sets + 1, s2_sets),  # Player 1 wins game
+                    make_score(40, 40)                        # Player 2 ties to deuce
+                ])
+            else:
+                # 40-0 or 40-15
+                possible_scores.extend([
+                    make_score(0, 0, s1_sets + 1, s2_sets),  # Player 1 wins game
+                    make_score(p1_pts, p2_pts + 15)          # Player 2 scores
+                ])
         
         elif p1_pts < 40 and p2_pts == 40:
-            # Player 2 can win game or Player 1 can score
-            possible_scores.extend([
-                make_score(0, 0, s1_sets, s2_sets + 1),  # Player 2 wins game
-                make_score(p1_pts + 15, p2_pts)          # Player 1 scores
-            ])
+            if p1_pts == 30:
+                # Special case: 30-40, player 1 can tie to deuce
+                possible_scores.extend([
+                    make_score(0, 0, s1_sets, s2_sets + 1),  # Player 2 wins game
+                    make_score(40, 40)                        # Player 1 ties to deuce
+                ])
+            else:
+                # 0-40 or 15-40
+                possible_scores.extend([
+                    make_score(0, 0, s1_sets, s2_sets + 1),  # Player 2 wins game
+                    make_score(p1_pts + 15, p2_pts)          # Player 1 scores
+                ])
         
         # Deuce and advantage scenarios
         elif p1_pts == 40 and p2_pts == 40:  # Deuce
             possible_scores.extend([
-                make_score(50, 40),  # Player 1 advantage
-                make_score(40, 50)   # Player 2 advantage
+                make_score("AD", 0),  # Player 1 advantage
+                make_score(0, "AD")   # Player 2 advantage
             ])
         
-        elif p1_pts == 50 and p2_pts == 40:  # Player 1 advantage
+        elif p1_pts == "AD" and p2_pts == 40:  # Player 1 advantage
             possible_scores.extend([
                 make_score(0, 0, s1_sets + 1, s2_sets),  # Player 1 wins game
                 make_score(40, 40)                       # Back to deuce
             ])
         
-        elif p1_pts == 40 and p2_pts == 50:  # Player 2 advantage
+        elif p1_pts == 40 and p2_pts == "AD":  # Player 2 advantage
             possible_scores.extend([
                 make_score(0, 0, s1_sets, s2_sets + 1),  # Player 2 wins game
                 make_score(40, 40)                       # Back to deuce

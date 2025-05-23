@@ -16,14 +16,6 @@ __C.detection_player.NMS_THRESHOLD = 0.45
 __C.detection_player.verbose = False
 __C.detection_player.max_det = 10
 
-# __C.detection_scoreboard = edict()
-# __C.detection_scoreboard.model = 'model_data/best_score_box.pt'
-# __C.detection_scoreboard.classes = [0]  # filter by class: --class 0, or --class 0 2 3
-# __C.detection_scoreboard.OBJECTNESS_CONFIDANCE = 0.2
-# __C.detection_scoreboard.NMS_THRESHOLD = 0.45
-# __C.detection_scoreboard.verbose = False
-# __C.detection_scoreboard.max_det = 1
-
 class DetectorType(Enum):
     PLAYER = "detection_player"
     SCOREBOARD = "detection_scoreboard"
