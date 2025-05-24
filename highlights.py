@@ -469,8 +469,8 @@ class Highlights:
         # Deuce and advantage scenarios
         elif p1_pts == 40 and p2_pts == 40:  # Deuce
             possible_scores.extend([
-                make_score("AD", 0),  # Player 1 advantage
-                make_score(0, "AD")   # Player 2 advantage
+                make_score("AD", 40),  # Player 1 advantage
+                make_score(40, "AD")   # Player 2 advantage
             ])
         
         elif p1_pts == "AD" and p2_pts == 40:  # Player 1 advantage
