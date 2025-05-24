@@ -9,7 +9,7 @@ cfg = __C
 
 # detector inference
 __C.detection_player = edict()
-__C.detection_player.model = 'model_data/best.pt'
+__C.detection_player.model = 'model_data/best_yolov8n.pt'
 __C.detection_player.classes = [0, 1, 2, 3, 4]  # filter by class: --class 0, or --class 0 2 3
 __C.detection_player.OBJECTNESS_CONFIDANCE = 0.2
 __C.detection_player.NMS_THRESHOLD = 0.45
@@ -48,7 +48,7 @@ __C.general.output_path = 'outputs'
 
 # overlay Flags
 __C.flags = edict()
-__C.flags.image_show = True
+__C.flags.image_show = False
 __C.flags.render_detections = True
 __C.flags.render_fps = False
 __C.flags.overlay_player_track = True

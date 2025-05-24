@@ -233,7 +233,6 @@ class Highlights:
                 is_ace, is_server_winner = self.ball.get_aces_serviceWinners(score_start_time, score_end_time)
                 if is_ace:
                     highlights['ace'] = True
-                    
                 if is_server_winner:
                     highlights['service_winner'] = True
                     
@@ -523,17 +522,17 @@ class Highlights:
                 return False
                 
         # Skip identical to last commit
-        if last and new_score['set_score'] == last['set_score'] and new_score['point_score'] == last['point_score']:
-            self._score_queue.clear()
-            return False
+        # if last and new_score['set_score'] == last['set_score'] and new_score['point_score'] == last['point_score']:
+        #     self._score_queue.clear()
+        #     return False
 
         # Skip regressions (only if we have a last committed score)
-        if last:
-            new_pts = new_score['point_score']
-            last_pts = last['point_score']
-            if new_pts[0] < last_pts[0] or new_pts[1] < last_pts[1]:
-                self._score_queue.clear()
-                return False
+        # if last:
+        #     new_pts = new_score['point_score']
+        #     last_pts = last['point_score']
+        #     if new_pts[0] < last_pts[0] or new_pts[1] < last_pts[1]:
+        #         self._score_queue.clear()
+        #         return False
 
         # If no committed score yet, accept any valid score (initial state)
         # Otherwise, only accept predicted/expected scores
