@@ -230,11 +230,12 @@ class Highlights:
                 score_end_time = max(p1.last_seen, p2.last_seen)
                 
                 # get the ball tragectory by time 
-                is_ace, is_server_winner = self.ball.get_aces_serviceWinners(score_start_time, score_end_time)
-                if is_ace:
-                    highlights['ace'] = True
-                if is_server_winner:
-                    highlights['service_winner'] = True
+                if self.ball:
+                    is_ace, is_server_winner = self.ball.get_aces_serviceWinners(score_start_time, score_end_time)
+                    if is_ace:
+                        highlights['ace'] = True
+                    if is_server_winner:
+                        highlights['service_winner'] = True
                     
                 energy = p1.compute_total_distance() + p2.compute_total_distance()
                 # flag extended rally if movement energy exceeds threshold
@@ -469,17 +470,17 @@ class Highlights:
         # Deuce and advantage scenarios
         elif p1_pts == 40 and p2_pts == 40:  # Deuce
             possible_scores.extend([
-                make_score("AD", 40),  # Player 1 advantage
-                make_score(40, "AD")   # Player 2 advantage
+                make_score(50, 40),  # Player 1 advantage
+                make_score(40, 50)   # Player 2 advantage
             ])
         
-        elif p1_pts == "AD" and p2_pts == 40:  # Player 1 advantage
+        elif p1_pts == 50 and p2_pts == 40:  # Player 1 advantage
             possible_scores.extend([
                 make_score(0, 0, s1_sets + 1, s2_sets),  # Player 1 wins game
                 make_score(40, 40)                       # Back to deuce
             ])
         
-        elif p1_pts == 40 and p2_pts == "AD":  # Player 2 advantage
+        elif p1_pts == 40 and p2_pts == 50:  # Player 2 advantage
             possible_scores.extend([
                 make_score(0, 0, s1_sets, s2_sets + 1),  # Player 2 wins game
                 make_score(40, 40)                       # Back to deuce
@@ -520,19 +521,6 @@ class Highlights:
             else:
                 # Ignore everything until 0-0 appears
                 return False
-                
-        # Skip identical to last commit
-        # if last and new_score['set_score'] == last['set_score'] and new_score['point_score'] == last['point_score']:
-        #     self._score_queue.clear()
-        #     return False
-
-        # Skip regressions (only if we have a last committed score)
-        # if last:
-        #     new_pts = new_score['point_score']
-        #     last_pts = last['point_score']
-        #     if new_pts[0] < last_pts[0] or new_pts[1] < last_pts[1]:
-        #         self._score_queue.clear()
-        #         return False
 
         # If no committed score yet, accept any valid score (initial state)
         # Otherwise, only accept predicted/expected scores
