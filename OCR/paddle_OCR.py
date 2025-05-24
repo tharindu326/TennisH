@@ -2,7 +2,7 @@ import os
 import sys
 main_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(main_dir)
-from paddleocr import PaddleOCR, draw_ocr
+from paddleocr import PaddleOCR
 import cv2
 import numpy as np
 import re
@@ -137,22 +137,6 @@ class PaddleOCRProcessor:
         }
 
         return ret, score
-
-    def draw_results(self, im, ocr_results, font_path, LP_boxes=None):
-        boxes = ocr_results["boxes"]
-        txts = ocr_results["texts"]
-        scores = ocr_results["scores"]
-        if LP_boxes:
-            # Adjust OCR boxes by adding LP box coordinates
-            adjusted_boxes = []
-            x_offset, y_offset = LP_boxes[0], LP_boxes[1]
-            for ocr_box in boxes:
-                adjusted_box = [[x + x_offset, y + y_offset] for x, y in ocr_box]
-                adjusted_boxes.append(adjusted_box)
-            boxes = adjusted_boxes
-   
-        drawn_image = draw_ocr(im, boxes, txts, scores, font_path=font_path)
-        return cv2.cvtColor(drawn_image, cv2.COLOR_RGB2BGR)
     
     def draw_score(self, im, ocr_results, box):
         boxes = ocr_results["boxes"]
