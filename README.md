@@ -200,3 +200,5 @@ The Tennis Analysis System automatically generates highlights by analyzing video
 | **Extended Rally** | Full length of unusually exciting rally               | **1s before, 1s after** |
 
 When multiple highlight events occur simultaneously for a single score (e.g., a break point combined with an extended rally), the system merges these events into a single clip. In such cases, the longest padding required among all triggered events is used, ensuring comprehensive context and capturing maximum excitement in each highlight.
+
+These smaller clips are individually saved to timestamped directories within the output folder as they are generated during video processing. At the end of the processing, all these clips are automatically merged into a single highlights video (`combined_highlights.mp4`)
