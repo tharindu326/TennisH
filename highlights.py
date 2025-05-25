@@ -219,10 +219,16 @@ class Highlights:
         
     def combine_clips(self):
         clips = []
-        for file in sorted(os.listdir(self.output_dir)):
-            if file.endswith('.mp4'):
-                clip_path = os.path.join(self.output_dir, file)
-                clips.append(VideoFileClip(clip_path))
+
+        # Sort by file modification time (oldest to newest)
+        files = sorted(
+            [f for f in os.listdir(self.output_dir) if f.endswith('.mp4')],
+            key=lambda x: os.path.getmtime(os.path.join(self.output_dir, x))
+        )
+
+        for file in files:
+            clip_path = os.path.join(self.output_dir, file)
+            clips.append(VideoFileClip(clip_path))
 
         if clips:
             final_clip = concatenate_videoclips(clips)
