@@ -1,6 +1,7 @@
 easydict
 gdown
 lap 
+moviepy
 paddlepaddle==2.6.2 
 paddleocr==2.9.1 lap 
 cython_bbox

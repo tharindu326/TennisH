@@ -184,3 +184,19 @@ For detailed setup instructions and advanced usage examples, refer to the `run_T
 
 - Step-by-step dependency installation
 - Sample video processing workflows
+
+# Highlights Generating Strategy
+
+The Tennis Analysis System automatically generates highlights by analyzing video data to detect key events. Each event type triggers the creation of a specific video clip segment, cropped based on the following ideal strategies:
+
+| **Event**          | **Ideal Cropping Strategy**                           | **Padding**             |
+| ------------------ | ----------------------------------------------------- | ----------------------- |
+| **Ace**            | Serve → ball bounce → brief reaction                  | **1s before, 2s after** |
+| **Service Winner** | Serve → quick point end                               | **1s before, 2s after** |
+| **Break Point**    | Entire rally, emphasizing tension and reaction        | **2s before, 3s after** |
+| **Advantage**      | Full rally (after deuce)                              | **2s before, 2s after** |
+| **Game Ending**    | Entire rally + celebration (reaction/player close-up) | **3s before, 4s after** |
+| **Set Ending**     | Full rally + extended celebration (crowd)             | **5s before, 5s after** |
+| **Extended Rally** | Full length of unusually exciting rally               | **1s before, 1s after** |
+
+When multiple highlight events occur simultaneously for a single score (e.g., a break point combined with an extended rally), the system merges these events into a single clip. In such cases, the longest padding required among all triggered events is used, ensuring comprehensive context and capturing maximum excitement in each highlight.

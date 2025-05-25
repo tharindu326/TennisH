@@ -11,6 +11,7 @@ import numpy as np
 import re
 import copy
 from enum import Enum
+from moviepy.editor import VideoFileClip, concatenate_videoclips
 
 
 class Score:
@@ -136,6 +137,7 @@ class Highlight():
         
 class Highlights:
     def __init__(self, input_video_path, source_fps):
+        self.input_video_path = input_video_path
         self.detector = Detector()
         self.tracker = GameTracker()
         self.scorer = ScoreReader()
@@ -171,6 +173,66 @@ class Highlights:
         # Current server: 'player1' or 'player2'
         self.current_server = 'player1'
         self.start_flag = True
+        
+        self.PADDING = {
+        'ace':            (1.0, 2.0),
+        'service_winner': (1.0, 2.0),
+        'break_point':    (2.0, 3.0),
+        'advantage':      (2.0, 2.0),
+        'game_ending':    (3.0, 4.0),
+        'set_ending':     (5.0, 5.0),
+        'extended_rally': (1.0, 1.0),
+    }
+
+    def save_highlight_clip(self, event_types, score):
+        pad_before = max(self.PADDING[event][0] for event in event_types)
+        pad_after = max(self.PADDING[event][1] for event in event_types)
+        clip_start = max(score.start_time - pad_before, 0)
+        clip_end = score.end_time + pad_after
+
+        events_str = "_".join(sorted(event_types))
+        out_name = f"{events_str}_{score.s1}-{score.s2}_{score.p1}-{score.p2}_{int(clip_start)}-{int(clip_end)}.mp4"
+        out_path = os.path.join(self.output_dir, out_name)
+
+        self._extract_clip_opencv(self.input_video_path, clip_start, clip_end, out_path)
+
+    def _extract_clip_opencv(self, video_path, start_s, end_s, output_path):
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+        writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+        cap.set(cv2.CAP_PROP_POS_MSEC, start_s * 1000)
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+            if not ret or t > end_s:
+                break
+            writer.write(frame)
+
+        writer.release()
+        cap.release()
+        
+    def combine_clips(self):
+        clips = []
+        for file in sorted(os.listdir(self.output_dir)):
+            if file.endswith('.mp4'):
+                clip_path = os.path.join(self.output_dir, file)
+                clips.append(VideoFileClip(clip_path))
+
+        if clips:
+            final_clip = concatenate_videoclips(clips)
+            combined_output = os.path.join(self.output_dir, 'combined_highlights.mp4')
+            final_clip.write_videofile(combined_output, codec='libx264')
+            final_clip.close()
+
+        # Close all clips
+        for clip in clips:
+            clip.close()
 
     def generate(self, frame, video_timestamp):
         """Track players in the frame"""
@@ -183,7 +245,7 @@ class Highlights:
         class_ids = detections[:, -1].astype(int)
         ball_dets = detections[(class_ids == 0)] # ball
         ball_boxes = ball_dets[:, :-2].astype(int)
-        net_dets = detections[(class_ids == 0)] # net
+        net_dets = detections[(class_ids == 2)] # net
         net_boxes = net_dets[:, :-2].astype(int)
         if len(net_boxes) > 0:
             net = net_boxes[0].tolist()
@@ -244,19 +306,21 @@ class Highlights:
                 
                 # remove the players after a point
                 self.tracker.players = []
+                
+                score_obj = Score(start_time=score_start_time, end_time=score_end_time, score=new_score, 
+                                  energy=energy, events=list(scoring_events.keys()))
 
-                self.scores.append(Score(start_time=score_start_time, end_time=score_end_time, score=new_score, 
-                                energy=energy, events=list(scoring_events.keys())))
+                self.scores.append(score_obj)
                 
                 for k, v in scoring_events.items():
-                    if v and k in ['advantage', 'break_point', 'game_ending']:
+                    if v and k in ['advantage', 'break_point', 'game_ending', 'set_ending']:
                         highlights[k] = True
-                        
-                self.highlights.append(Highlight(score_obj=self.scores[-1], h_types=highlights))
                 
                 if highlights:
+                    self.highlights.append(Highlight(score_obj=score_obj, h_types=highlights))
                     if cfg.flags.overlay_highlights:
                         self._draw_highlight_overlay(frame, highlights)
+                    self.save_highlight_clip(highlights.keys(), score_obj)
 
                 self.score2CSV()
             
@@ -320,14 +384,12 @@ class Highlights:
         return False
 
     def _is_break_point(self, curr):
-        # Only at 30-40 (receiver holds break chance)
         pt = curr['point_score']
         if self.current_server == 'player1':
-            # Receiver is player2 at break point
-            return pt == [30, 40]
+            return pt in ([30, 40], [0, 40], [15, 40], [40, 50])
         else:
-            return pt == [40, 30]
-
+            return pt in ([40, 30], [40, 0], [40, 15], [50, 40])
+    
     def _is_advantage(self, curr):
         # Advantage only after deuce (both had 40)
         pt = curr['point_score']

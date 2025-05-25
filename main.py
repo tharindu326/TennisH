@@ -131,7 +131,7 @@ class Video:
                 print(f'Frame: {int(count)} | FPS: {fps_print:.2f}')
             if len(self.time_array) > 30:
                 self.time_array.pop(0)
-
+        self.highlights.combine_clips()
         if pbar:
             pbar.close()
             
