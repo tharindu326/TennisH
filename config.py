@@ -125,7 +125,7 @@ __C.OCR = edict()
 __C.OCR.preprocess = True
 
 __C.highlights = edict()
-__C.highlights.debounce_secs_for_score_change = 0.2
+__C.highlights.debounce_secs_for_score_change = 0.1
 __C.highlights.extended_rally_energy_threshold = 2000
 
 __C.players = edict()
