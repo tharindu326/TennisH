@@ -63,6 +63,15 @@ __C.video.FOURCC = 'mp4v'  # 'avc1'  # 4-byte code used to specify the video cod
 __C.video.requiredFPS = 20
 __C.video.save = True
 __C.video.FPS = 30  # FPS of the source
+__C.video.HIGHLIGHTS_PADDING = {
+                                'ace':            (0, 0),
+                                'service_winner': (0, 0),
+                                'break_point':    (0, 0),
+                                'advantage':      (0, 0),
+                                'game_ending':    (0, 0),
+                                'set_ending':     (0, 0),
+                                'extended_rally': (0, 0),
+                            }
 
 # Trackers
 __C.tracker = edict()

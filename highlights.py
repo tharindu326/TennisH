@@ -174,15 +174,7 @@ class Highlights:
         self.current_server = 'player1'
         self.start_flag = True
         
-        self.PADDING = {
-        'ace':            (1.0, 2.0),
-        'service_winner': (1.0, 2.0),
-        'break_point':    (2.0, 3.0),
-        'advantage':      (2.0, 2.0),
-        'game_ending':    (3.0, 4.0),
-        'set_ending':     (5.0, 5.0),
-        'extended_rally': (1.0, 1.0),
-    }
+        self.PADDING = cfg.video.HIGHLIGHTS_PADDING
 
     def save_highlight_clip(self, event_types, score):
         pad_before = max(self.PADDING[event][0] for event in event_types)
