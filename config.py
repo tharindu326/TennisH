@@ -43,7 +43,7 @@ __C.general.COLORS = {
                           'red': [64, 0, 255]
                       }
 __C.general.model_path = 'model_data'
-__C.general.device = 'cpu'  # if GPU give the device ID; EX: , else 'cpu'
+__C.general.device = 0  # if GPU give the device ID; EX: , else 'cpu'
 __C.general.output_path = 'outputs'
 
 # overlay Flags

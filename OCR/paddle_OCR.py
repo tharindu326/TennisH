@@ -18,6 +18,8 @@ class PaddleOCRProcessor:
                                 gpu_mem=gpu_mem,
                                 lang=lang
                             )
+        if use_gpu:
+            print("Successfully loaded PaddleOCR with GPU")
 
     def process_image(self, image):
         ret = {"boxes": [], "texts": [], "scores": []}
