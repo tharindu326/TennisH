@@ -139,7 +139,6 @@ class Video:
             self.writer.release()
             print(f"Video saved to: {self.outVideoPath}")
         self.cap.release()
-        cv2.destroyAllWindows()
             
 
 if __name__ == '__main__':
