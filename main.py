@@ -131,9 +131,15 @@ class Video:
                 print(f'Frame: {int(count)} | FPS: {fps_print:.2f}')
             if len(self.time_array) > 30:
                 self.time_array.pop(0)
-        self.highlights.combine_clips()
+        # self.highlights.combine_clips()
         if pbar:
             pbar.close()
+            
+        if self.writer is not None:
+            self.writer.release()
+            print(f"Video saved to: {self.outVideoPath}")
+        self.cap.release()
+        cv2.destroyAllWindows()
             
 
 if __name__ == '__main__':
